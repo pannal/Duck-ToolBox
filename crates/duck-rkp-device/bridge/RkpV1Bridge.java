@@ -19,6 +19,11 @@ public final class RkpV1Bridge {
     public static void main(String[] args) throws Exception {
         if (args.length != 1) throw new IllegalArgumentException("expected exchange directory");
         File directory = new File(args[0]);
+        // Marker confirms the Java entrypoint ran and received the expected directory.
+        // It contains no key material or device identifiers.
+        try (FileOutputStream marker = new FileOutputStream(new File(directory, "entrypoint.marker"))) {
+            marker.write(1);
+        }
         // Status 0: MAC, DeviceInfo, ProtectedData. Status 1: AIDL error code and message.
         // Status 2: transport error. Status 3: invalid HAL response.
         // Every byte string has a big-endian int length.
