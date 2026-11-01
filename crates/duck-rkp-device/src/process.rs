@@ -36,7 +36,9 @@ pub(crate) fn run_captured(
         .mode(0o600)
         .open(output_path)
         .with_context(|| format!("create worker diagnostics {}", output_path.display()))?;
-    let errors = output.try_clone().context("clone worker diagnostics handle")?;
+    let errors = output
+        .try_clone()
+        .context("clone worker diagnostics handle")?;
     command
         .stdin(Stdio::null())
         .stdout(Stdio::from(output))
