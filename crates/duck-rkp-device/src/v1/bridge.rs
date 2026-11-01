@@ -39,12 +39,25 @@ fn run(paths: &AppPaths, apk: &Path, request: &Request) -> Result<Response> {
         .env("CLASSPATH", format!("{}:{}", jar.display(), apk.display()))
         .args(["/system/bin", "duck.rkp.RkpV1Bridge"])
         .arg(exchange.path());
-    let status = process::run(&mut command, Duration::from_secs(30))?;
+    let diagnostics = exchange.path().join("app_process.log");
+    let status = process::run_captured(&mut command, Duration::from_secs(30), &diagnostics)?;
+    let entered = exchange.path().join("entrypoint.marker").is_file();
     if !status.success() {
-        return Err(DeviceRkpError::Transport(format!("V1 bridge exited with {status}")).into());
+        return Err(DeviceRkpError::Transport(format!(
+            "V1 bridge exited with {status} (Java entrypoint={entered}): {}",
+            process::worker_diagnostic(&diagnostics)
+        ))
+        .into());
     }
-    let bytes =
-        process::read_exchange_file(&exchange.path().join("reply.bin"), BUFFER_SIZE * 3 + 16)?;
+    let reply_path = exchange.path().join("reply.bin");
+    if !reply_path.is_file() {
+        return Err(DeviceRkpError::Transport(format!(
+            "V1 bridge exited with {status} but reply.bin is missing (Java entrypoint={entered}): {}",
+            process::worker_diagnostic(&diagnostics)
+        ))
+        .into());
+    }
+    let bytes = process::read_exchange_file(&reply_path, BUFFER_SIZE * 3 + 16)?;
     wire::decode_response(&bytes).map_err(|error| {
         if error.chain().any(|cause| cause.is::<DeviceRkpError>()) {
             error
