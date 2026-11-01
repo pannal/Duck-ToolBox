@@ -23,6 +23,54 @@ pub(crate) fn run(command: &mut Command, timeout: Duration) -> Result<ExitStatus
     Worker(child).wait(timeout)
 }
 
+/// Run a device adapter with a private, on-device stdout/stderr capture.
+/// Only the V1 bridge uses this while diagnosing startup failures.
+pub(crate) fn run_captured(
+    command: &mut Command,
+    timeout: Duration,
+    output_path: &Path,
+) -> Result<ExitStatus> {
+    let output = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(output_path)
+        .with_context(|| format!("create worker diagnostics {}", output_path.display()))?;
+    let errors = output
+        .try_clone()
+        .context("clone worker diagnostics handle")?;
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(output))
+        .stderr(Stdio::from(errors));
+    detach_from_terminal(command);
+    let child = command
+        .spawn()
+        .map_err(|error| DeviceRkpError::Transport(format!("start device worker: {error}")))?;
+    Worker(child).wait(timeout)
+}
+
+/// Return a bounded, one-line diagnostic without reading any protocol exchange files.
+pub(crate) fn worker_diagnostic(output_path: &Path) -> String {
+    const MAX_BYTES: u64 = 2048;
+    let Ok(file) = fs::File::open(output_path) else {
+        return "app_process output unavailable".into();
+    };
+    let mut bytes = Vec::new();
+    if file.take(MAX_BYTES).read_to_end(&mut bytes).is_err() {
+        return "app_process output unreadable".into();
+    }
+    let summary = String::from_utf8_lossy(&bytes)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if summary.is_empty() {
+        "app_process produced no output".into()
+    } else {
+        format!("app_process output (first {MAX_BYTES} bytes): {summary}")
+    }
+}
+
 /// Puts the child in its own session, so a Ctrl-C aimed at the CLI (or anything else
 /// signalling the process group) cannot interrupt the vendor call halfway through. The
 /// null stdio above leaves the new session with nothing open on the terminal.
